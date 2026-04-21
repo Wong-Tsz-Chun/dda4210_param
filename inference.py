@@ -3,7 +3,28 @@ import torch.nn.functional as F
 import sentencepiece as spm
 import os
 import argparse
-from train_gpt import GPT, Hyperparameters
+from train_gpt_original import GPT, Hyperparameters
+
+class GPT_with_inference(GPT):
+    def forward(self, input_ids):
+        x = self.tok_emb(input_ids)
+        x = F.rms_norm(x, (x.size(-1),))
+        x0 = x
+        skips = []
+        for i in range(self.num_encoder_layers):
+            x = self.blocks[i](x, x0)
+            skips.append(x)
+        for i in range(self.num_decoder_layers):
+            if skips:
+                x = x + self.skip_weights[i].to(dtype=x.dtype)[None, None, :] * skips.pop()
+            x = self.blocks[self.num_encoder_layers + i](x, x0)
+        x = self.final_norm(x)
+        if self.tie_embeddings:
+            logits_proj = F.linear(x, self.tok_emb.weight)
+        else:
+            logits_proj = self.lm_head(x)
+        logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        return logits
 
 def generate(model, tokenizer, prompt, max_new_tokens=50, temperature=1.0, top_k=50, device='cuda'):
     model.eval()
@@ -61,13 +82,12 @@ def main():
     # 2. Hyperparameters (Must match train_gpt settings exactly)
     # Using the same 17M parameter config from train_gpt
     hp = Hyperparameters()
-    hp.num_loops = 2  # Matches our recurrent 9x2 setup
     
     # 3. Initialize Model
-    model = GPT(
+    model = GPT_with_inference(
         hp.vocab_size, hp.num_layers, hp.model_dim, hp.num_heads, hp.num_kv_heads, 
         hp.mlp_mult, hp.tie_embeddings, hp.tied_embed_init_std, hp.logit_softcap, 
-        hp.rope_base, hp.qk_gain_init, hp.num_loops
+        hp.rope_base, hp.qk_gain_init
     ).to(device)
     
     # 4. Load Weights
@@ -79,12 +99,28 @@ def main():
         print(f"Warning: {args.model_path} not found. Running with uninitialized weights.")
 
     # 5. Generate
-    print("\n--- Generating ---")
-    print(f"Prompt: {args.prompt}")
-    output = generate(model, sp, args.prompt, max_new_tokens=args.max_tokens, temperature=args.temp, top_k=args.top_k, device=device)
-    print("\nResult:")
-    print(output)
-    print("------------------\n")
+    print("\nWelcome to Full-Precision GPT Inference!")
+    print("Type your prompt and press Enter. Type 'exit' or 'quit' to stop.\n")
+    
+    while True:
+        try:
+            prompt = input("Prompt: ")
+            if prompt.lower() in ['exit', 'quit']:
+                break
+            if not prompt.strip():
+                continue
+                
+            print("\n--- Generating ---")
+            output = generate(model, sp, prompt, max_new_tokens=args.max_tokens, temperature=args.temp, top_k=args.top_k, device=device)
+            print("\nResult:")
+            print(output)
+            print("------------------\n")
+            
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
+        except Exception as e:
+            print(f"\nAn error occurred: {e}")
 
 if __name__ == "__main__":
     main()

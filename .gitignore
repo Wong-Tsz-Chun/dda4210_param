@@ -34,3 +34,6 @@ __pycache__/
 data/datasets/
 data/tokenizers/
 !data/README.md
+
+# Scratch
+scratch/
