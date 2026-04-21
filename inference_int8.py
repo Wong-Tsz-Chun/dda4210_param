@@ -104,8 +104,8 @@ class Block(nn.Module):
 
     def forward(self, x, x0):
         # x0 is the initial embedding projection
-        # Based on train_gpt.py: x = x + mix[1] * x0
-        x = x + self.resid_mix[1][None, None, :] * x0
+        mix = self.resid_mix
+        x = mix[0][None, None, :] * x + mix[1][None, None, :] * x0
         x = x + self.attn_scale[None, None, :] * self.attn(self.attn_norm(x))
         x = x + self.mlp_scale[None, None, :] * self.mlp(self.mlp_norm(x))
         return x
@@ -115,6 +115,11 @@ class GPT(nn.Module):
         super().__init__()
         self.logit_softcap = logit_softcap
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
+        self.num_encoder_layers = num_layers // 2
+        self.num_decoder_layers = num_layers - self.num_encoder_layers
+        self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
+        self.skip_weights = nn.Parameter(torch.ones(self.num_skip_weights, model_dim))
+        
         self.blocks = nn.ModuleList([
             Block(model_dim, num_heads, num_kv_heads, mlp_mult)
             for _ in range(num_layers)
@@ -126,8 +131,15 @@ class GPT(nn.Module):
         x = F.rms_norm(x, (x.size(-1),))
         x0 = x
         
-        for block in self.blocks:
-            x = block(x, x0)
+        skips = []
+        for i in range(self.num_encoder_layers):
+            x = self.blocks[i](x, x0)
+            skips.append(x)
+            
+        for i in range(self.num_decoder_layers):
+            if skips:
+                x = x + self.skip_weights[i][None, None, :] * skips.pop()
+            x = self.blocks[self.num_encoder_layers + i](x, x0)
             
         x = self.final_norm(x)
         # Tied embeddings
