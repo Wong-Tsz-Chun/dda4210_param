@@ -1,11 +1,36 @@
-data/tokenizers
-__pycache__/
-.DS_Store
-modded-nanogpt/
-modded-nanogpt
-data/datasets
-data/manifest.json
-data/docs_selected.jsonl
-.mypy_cache/
+# Environments
+venv/
+.env
 .venv
+env/
+venv.bak/
+.local
+
+# Weights and Artifacts
+*.pt
+*.ptz
+*.pth
+*.ckpt
+*.onnx
+
+# Logs and Monitoring
 logs/
+*.log
+.wandb/
+wandb/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and Project Meta
+.vscode/
+.idea/
+.gemini/
+.antigravity/
+
+# Data
+data/datasets/
+data/tokenizers/
+!data/README.md
